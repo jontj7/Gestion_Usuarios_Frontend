@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { authAPI } from '../services/api';
 import { User, LoginCredentials, RegisterData, AuthResponse } from '../types';
 
@@ -9,6 +9,9 @@ interface AuthContextType {
     register: (userData: RegisterData) => Promise<AuthResponse>;
     logout: () => Promise<void>;
     isAuthenticated: boolean;
+    showSessionModal: boolean;
+    continueSession: () => Promise<void>;
+    cancelSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -28,9 +31,9 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
-    const [tokenRefreshInterval, setTokenRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+    const tokenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [showSessionModal, setShowSessionModal] = useState(false);
 
-    // Initialize auth state from localStorage
     useEffect(() => {
         const initAuth = async () => {
             const token = localStorage.getItem('auth_token');
@@ -38,13 +41,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
             if (token && storedUser) {
                 try {
-                    // Verify token is still valid
                     await authAPI.checkToken();
                     setUser(JSON.parse(storedUser));
-                    startTokenRefresh();
-                } catch (error) {
-                    console.error('Token validation failed:', error);
-                    logout();
+                    startTokenExpirationTimer();
+                } catch {
+                    await logout();
                 }
             }
 
@@ -54,59 +55,72 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         initAuth();
 
         return () => {
-            if (tokenRefreshInterval) {
-                clearInterval(tokenRefreshInterval);
+            if (tokenTimerRef.current) {
+                clearTimeout(tokenTimerRef.current);
+                tokenTimerRef.current = null;
             }
         };
     }, []);
 
-    // Auto-refresh token every 4 minutes (token expires in 5 minutes)
-    const startTokenRefresh = () => {
-        const interval = setInterval(async () => {
-            try {
-                await authAPI.refreshToken();
-                console.log('Token refreshed successfully');
-            } catch (error) {
-                console.error('Failed to refresh token:', error);
-                logout();
-            }
-        }, 4 * 60 * 1000); // 4 minutes
+    const TOKEN_DURATION_MS = 5 * 60 * 1000; // 5 minutos reales
 
-        setTokenRefreshInterval(interval);
+    const startTokenExpirationTimer = (msUntilExpiry?: number) => {
+        if (tokenTimerRef.current) {
+            clearTimeout(tokenTimerRef.current);
+            tokenTimerRef.current = null;
+        }
+
+        const timeoutMs = typeof msUntilExpiry === 'number' ? msUntilExpiry : TOKEN_DURATION_MS;
+
+        tokenTimerRef.current = setTimeout(() => {
+            setShowSessionModal(true);
+        }, timeoutMs);
     };
 
     const login = async (credentials: LoginCredentials): Promise<AuthResponse> => {
-        try {
-            const response = await authAPI.login(credentials);
-            setUser(response.user);
-            startTokenRefresh();
-            return response;
-        } catch (error) {
-            throw error;
-        }
+        const response = await authAPI.login(credentials);
+        setUser(response.user);
+        localStorage.setItem('auth_token', response.token);
+        localStorage.setItem('user', JSON.stringify(response.user));
+        startTokenExpirationTimer();
+        return response;
     };
 
     const register = async (userData: RegisterData): Promise<AuthResponse> => {
-        try {
-            const response = await authAPI.register(userData);
-            return response;
-        } catch (error) {
-            throw error;
-        }
+        const response = await authAPI.register(userData);
+        return response;
     };
 
     const logout = async (): Promise<void> => {
         try {
             await authAPI.logout();
-        } catch (error) {
-            console.error('Logout error:', error);
         } finally {
             setUser(null);
-            if (tokenRefreshInterval) {
-                clearInterval(tokenRefreshInterval);
-                setTokenRefreshInterval(null);
+            setShowSessionModal(false);
+
+            if (tokenTimerRef.current) {
+                clearTimeout(tokenTimerRef.current);
+                tokenTimerRef.current = null;
             }
+
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user');
         }
+    };
+
+    const continueSession = async () => {
+        try {
+            await authAPI.refreshToken();
+            startTokenExpirationTimer();
+            setShowSessionModal(false);
+        } catch {
+            await logout();
+        }
+    };
+
+    const cancelSession = () => {
+        setShowSessionModal(false);
+        logout();
     };
 
     const value: AuthContextType = {
@@ -116,6 +130,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         register,
         logout,
         isAuthenticated: !!user,
+        showSessionModal,
+        continueSession,
+        cancelSession
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
