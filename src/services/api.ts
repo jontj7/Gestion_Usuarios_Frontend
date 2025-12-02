@@ -39,12 +39,12 @@ const fetchWithAuth = async <T>(url: string, options: RequestInit = {}): Promise
     });
 
     // Handle token expiration
+    // ❗ CAMBIO MÍNIMO: Ya NO hacemos redirect aquí
     if (response.status === 401) {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
         localStorage.removeItem('token_expires_at');
-        window.location.href = '/login';
-        throw new Error('Session expired. Please login again.');
+        throw new Error('Session expired.');
     }
 
     return handleResponse<T>(response);
@@ -105,11 +105,12 @@ export const authAPI = {
         return data;
     },
 
-    // Refresh token  ->  POST /api/auth/refresh
+    // Refresh token  ->  POST /api/auth/refresh-token
     refreshToken: async (): Promise<AuthResponse> => {
         const data = await fetchWithAuth<AuthResponse>(`${API_BASE_URL}/auth/refresh`, {
             method: 'POST',
         });
+
 
         if (data.token) {
             localStorage.setItem('auth_token', data.token);
@@ -122,6 +123,7 @@ export const authAPI = {
     },
 
     // Check token validity  ->  GET /api/auth/check
+    // ❗ CAMBIO MÍNIMO: Este endpoint sí existe en tu backend
     checkToken: async (): Promise<AuthResponse> => {
         return fetchWithAuth<AuthResponse>(`${API_BASE_URL}/auth/check`);
     },
