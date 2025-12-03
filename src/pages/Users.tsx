@@ -69,11 +69,20 @@ const Users = () => {
     };
 
     const filteredUsers = users.filter(user => {
-        const search = searchTerm.toLowerCase();
+        const search = searchTerm.toLowerCase().trim();
+
+        const nombre = user.nombre?.toLowerCase() || "";
+        const apellido = user.apellido?.toLowerCase() || "";
+        const nombreCompleto = `${nombre} ${apellido}`.trim();
+        const email = user.email?.toLowerCase() || "";
+        const telefono = user.telefono?.toString() || "";
         return (
-            user.nombre?.toLowerCase().includes(search) ||
-            user.apellido?.toLowerCase().includes(search) ||
-            user.email?.toLowerCase().includes(search)
+            nombre.includes(search) ||
+            apellido.includes(search) ||
+            nombreCompleto.includes(search) ||
+            email.includes(search) ||
+            telefono.includes(search)
+
         );
     });
 
